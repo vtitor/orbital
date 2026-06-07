@@ -1,0 +1,38 @@
+<idea-plugin>
+    <id>com.github.cosmosdbclient</id>
+    <name>Orbital</name>
+    <vendor>Orbital</vendor>
+
+    <description><![CDATA[
+        <h2>Orbital — a visual client for Azure Cosmos DB</h2>
+        <p><b>Orbital</b> is a visual client for <b>Azure Cosmos DB</b> (SQL / Core API) inside
+        PyCharm and other JetBrains IDEs. Browse and manage your account, run queries, and edit
+        documents and server-side scripts without leaving the IDE.</p>
+        <ul>
+            <li>Manage multiple account connections (keys are stored in the IDE <i>PasswordSafe</i>, not in plain text).</li>
+            <li>Tree explorer: account → databases → containers → stored procedures / triggers / UDFs.</li>
+            <li>Create / delete databases and containers; view throughput and properties.</li>
+            <li>Run SQL with paging; results in a sortable table; see the request charge (RU) per page.</li>
+            <li>View, create, edit (upsert) and delete documents as JSON, with partition-key handling.</li>
+        </ul>
+        <p>Connect with an Account URI + key, or paste a full connection string.</p>
+        <p><small><b>Disclaimer:</b> Orbital is an independent, third-party product. It is not
+        affiliated with, endorsed, or sponsored by Microsoft. &quot;Azure&quot; and
+        &quot;Azure Cosmos DB&quot; are trademarks of the Microsoft group of companies.</small></p>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <ul><li><b>0.1.0</b> — Initial release: connections, explorer tree, query runner, document CRUD, server-side scripts.</li></ul>
+    ]]></change-notes>
+
+    <!-- Works in every IntelliJ-based IDE (PyCharm, IDEA, ...). -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="Orbital"
+                    anchor="right"
+                    icon="/icons/cosmos.svg"
+                    factoryClass="com.github.cosmosdbclient.ui.CosmosToolWindowFactory"/>
+        <notificationGroup id="Orbital" displayType="BALLOON"/>
+    </extensions>
+</idea-plugin>
