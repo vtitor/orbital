@@ -5,6 +5,7 @@ import com.azure.cosmos.models.PartitionKeyBuilder
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,12 +63,34 @@ class CosmosServiceLogicTest {
         assertEquals(expected, actual)
     }
 
-    @Test fun partitionKeyFromTextInfersType() {
-        assertEquals(PartitionKey.NONE, service.partitionKeyFromText(""))
-        assertEquals(PartitionKey(true), service.partitionKeyFromText("true"))
-        assertEquals(PartitionKey(false), service.partitionKeyFromText("false"))
-        assertEquals(PartitionKey(42.0), service.partitionKeyFromText("42"))
-        assertEquals(PartitionKey("hello"), service.partitionKeyFromText("hello"))
+    @Test fun partitionKeyFromJsonKeepsExactType() {
+        assertEquals(PartitionKey.NONE, service.partitionKeyFromJson(""))
+        assertEquals(PartitionKey(42.0), service.partitionKeyFromJson("42"))
+        assertEquals(PartitionKey(true), service.partitionKeyFromJson("true"))
+        assertEquals(PartitionKey("hello"), service.partitionKeyFromJson("\"hello\""))
+        // A JSON string "42" must stay a string, not be coerced to a number.
+        assertEquals(PartitionKey("42"), service.partitionKeyFromJson("\"42\""))
+        assertNotEquals(PartitionKey(42.0), service.partitionKeyFromJson("\"42\""))
+    }
+
+    @Test fun partitionKeyFromJsonSupportsHierarchicalArray() {
+        val expected = PartitionKeyBuilder().add("tenant").add(7.0).build()
+        assertEquals(expected, service.partitionKeyFromJson("""["tenant", 7]"""))
+    }
+
+    @Test(expected = Exception::class)
+    fun partitionKeyFromJsonRejectsInvalidJson() {
+        service.partitionKeyFromJson("{not valid")
+    }
+
+    @Test fun partitionKeyOfKeepsNullNoneAndEmptyDistinct() {
+        val none = service.partitionKeyOf(obj("""{"id":"x"}"""), listOf("/pk"))   // field absent
+        val nul = service.partitionKeyOf(obj("""{"pk":null}"""), listOf("/pk"))   // explicit null
+        val empty = service.partitionKeyOf(obj("""{"pk":""}"""), listOf("/pk"))   // empty string
+        assertEquals(PartitionKey.NONE, none)
+        assertNotEquals(none, nul)
+        assertNotEquals(none, empty)
+        assertNotEquals(nul, empty)
     }
 
     @Test fun normalizePathEnsuresLeadingSlash() {

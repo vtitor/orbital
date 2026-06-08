@@ -16,6 +16,7 @@ import com.azure.cosmos.models.TriggerOperation
 import com.azure.cosmos.models.TriggerType
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.github.cosmosdbclient.model.CosmosConnection
 import com.intellij.openapi.Disposable
@@ -281,35 +282,45 @@ class CosmosService : Disposable {
         return mapper.convertValue(node, List::class.java)
     }
 
+    /**
+     * Builds the partition key for a document. Single and hierarchical keys are built the same
+     * way (a one-component builder equals a scalar PartitionKey), and the three special cases stay
+     * distinct: an absent field -> none/undefined, an explicit JSON null -> null, an empty string
+     * -> "" (a real value).
+     */
     fun partitionKeyOf(document: JsonNode, paths: List<String>): PartitionKey {
         if (paths.isEmpty()) return PartitionKey.NONE
-        if (paths.size == 1) return singleKey(valueAt(document, paths[0]))
         val builder = PartitionKeyBuilder()
-        for (path in paths) addKey(builder, valueAt(document, path))
+        for (path in paths) appendComponent(builder, valueAt(document, path))
         return builder.build()
     }
 
-    /** Builds a [PartitionKey] from a raw string the user typed (best-effort type inference). */
-    fun partitionKeyFromText(text: String): PartitionKey = when {
-        text.isBlank() -> PartitionKey.NONE
-        text == "true" || text == "false" -> PartitionKey(text.toBoolean())
-        text.toDoubleOrNull() != null -> PartitionKey(text.toDouble())
-        else -> PartitionKey(text)
+    /**
+     * Parses a partition key entered by the user as JSON, so values keep their exact type and
+     * hierarchical keys are expressible as an array. Examples: "abc", 42, true, null,
+     * ["tenant", 7]. A blank input means the none/undefined partition.
+     */
+    fun partitionKeyFromJson(text: String): PartitionKey {
+        if (text.isBlank()) return PartitionKey.NONE
+        val node = mapper.readTree(text) ?: throw IllegalArgumentException("Invalid partition key JSON.")
+        val builder = PartitionKeyBuilder()
+        if (node is ArrayNode) {
+            require(node.size() > 0) { "Hierarchical partition key array must not be empty." }
+            node.forEach { appendComponent(builder, it) }
+        } else {
+            appendComponent(builder, node)
+        }
+        return builder.build()
     }
 
-    private fun singleKey(value: JsonNode?): PartitionKey = when {
-        value == null || value.isNull -> PartitionKey.NONE
-        value.isBoolean -> PartitionKey(value.asBoolean())
-        value.isNumber -> PartitionKey(value.asDouble())
-        else -> PartitionKey(value.asText())
-    }
-
-    private fun addKey(builder: PartitionKeyBuilder, value: JsonNode?) {
+    /** Adds one component to [builder], keeping absent / null / value distinct. */
+    private fun appendComponent(builder: PartitionKeyBuilder, value: JsonNode?) {
         when {
-            value == null || value.isNull -> builder.add("")
+            value == null -> builder.addNoneValue()        // field absent / undefined
+            value.isNull -> builder.addNullValue()          // explicit JSON null
             value.isBoolean -> builder.add(value.asBoolean())
             value.isNumber -> builder.add(value.asDouble())
-            else -> builder.add(value.asText())
+            else -> builder.add(value.asText())             // string, including ""
         }
     }
 

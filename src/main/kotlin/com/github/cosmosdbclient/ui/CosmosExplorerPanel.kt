@@ -53,7 +53,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     private val tree = Tree(treeModel)
 
     private val tabs = JBTabbedPane()
-    private val openTabs = mutableMapOf<String, QueryPanel>()
+    private val openTabs = mutableMapOf<TabKey, QueryPanel>()
     private val rightCards = JPanel(CardLayout())
 
     init {
@@ -366,7 +366,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     // ---- connection actions ----------------------------------------------------
 
     private fun addConnection() {
-        val dialog = AddConnectionDialog(project, null)
+        val dialog = AddConnectionDialog(project, null, service.connections().map { it.name }.toSet())
         if (!dialog.showAndGet()) return
         val input = dialog.result()
         service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key)
@@ -466,7 +466,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     // ---- query tabs ------------------------------------------------------------
 
     private fun openQueryTab(data: ContainerNode) {
-        val key = listOf(data.connectionName, data.databaseId, data.containerId).joinToString(" ")
+        val key = TabKey(data.connectionName, data.databaseId, data.containerId)
         openTabs[key]?.let { existing ->
             tabs.selectedComponent = existing
             return
@@ -510,6 +510,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     }
 
     private fun openScript(data: ScriptNode) {
+        val folderNode = selectedNode()?.let { parentNode(it) }
         Bg.run(
             project,
             "Loading ${data.scriptId}…",
@@ -532,8 +533,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
             onSuccess = { (body, type, op) ->
                 val dialog = ScriptEditorDialog(project, data.kind, data.scriptId, body, type, op)
                 if (dialog.showAndGet()) {
-                    val folder = selectedNode()?.let { parentNode(it) }
-                    saveScript(asFolder(data), dialog.result(), isNew = false) { folder?.let { reload(it) } }
+                    saveScript(asFolder(data), dialog.result(), isNew = false) { folderNode?.let { reload(it) } }
                 }
             },
         )
@@ -590,13 +590,13 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     private fun executeStoredProcedure(data: ScriptNode) {
         val dialog = ExecuteSprocDialog(project)
         if (!dialog.showAndGet()) return
-        val params = try {
-            service.parseParams(dialog.paramsText())
+        val parsed = try {
+            service.parseParams(dialog.paramsText()) to service.partitionKeyFromJson(dialog.partitionKeyText())
         } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: "Invalid parameters.", "Invalid Parameters")
+            Messages.showErrorDialog(project, e.message ?: "Invalid input.", "Invalid Input")
             return
         }
-        val partitionKey = service.partitionKeyFromText(dialog.partitionKeyText())
+        val (params, partitionKey) = parsed
         Bg.run(
             project,
             "Executing ${data.scriptId}…",
@@ -614,6 +614,8 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun asFolder(script: ScriptNode): ScriptsFolderNode =
         ScriptsFolderNode(script.connectionName, script.databaseId, script.containerId, script.kind)
+
+    private data class TabKey(val connection: String, val database: String, val container: String)
 
     private companion object {
         const val CARD_EMPTY = "empty"

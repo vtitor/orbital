@@ -38,6 +38,7 @@ import javax.swing.SpinnerNumberModel
 class AddConnectionDialog(
     private val project: Project?,
     private val existing: CosmosConnection?,
+    private val existingNames: Set<String> = emptySet(),
 ) : DialogWrapper(project) {
 
     private val nameField = JBTextField(existing?.name.orEmpty(), 32)
@@ -89,6 +90,9 @@ class AddConnectionDialog(
     override fun doValidate(): ValidationInfo? {
         val result = result()
         if (result.name.isBlank()) return ValidationInfo("A display name is required.", nameField)
+        if (existing == null && result.name in existingNames) {
+            return ValidationInfo("A connection named \"${result.name}\" already exists.", nameField)
+        }
         if (result.endpoint.isBlank()) return ValidationInfo("Account URI is required.", endpointField)
         if (!result.endpoint.startsWith("http", ignoreCase = true)) {
             return ValidationInfo("Account URI should start with https://", endpointField)
@@ -347,11 +351,20 @@ class ExecuteSprocDialog(project: Project?) : DialogWrapper(project) {
         init()
     }
 
-    override fun createCenterPanel(): JComponent = FormBuilder.createFormBuilder()
-        .addLabeledComponent("Partition key value:", partitionKeyField)
-        .addLabeledComponentFillVertically("Parameters (JSON array):", paramsEditor)
-        .panel
-        .apply { preferredSize = Dimension(560, 280) }
+    override fun createCenterPanel(): JComponent {
+        partitionKeyField.toolTipText =
+            "JSON value: \"abc\", 42, true, null, or [\"a\", 1] for hierarchical keys; blank = none"
+        val hint = JBLabel(
+            "<html>JSON: <code>\"abc\"</code>, <code>42</code>, <code>true</code>, <code>null</code>, " +
+                "or <code>[\"a\", 1]</code> (hierarchical). Blank = none.</html>",
+        ).apply { foreground = JBColor.GRAY }
+        return FormBuilder.createFormBuilder()
+            .addLabeledComponent("Partition key (JSON):", partitionKeyField)
+            .addComponent(hint)
+            .addLabeledComponentFillVertically("Parameters (JSON array):", paramsEditor)
+            .panel
+            .apply { preferredSize = Dimension(560, 300) }
+    }
 
     fun partitionKeyText(): String = partitionKeyField.text.trim()
     fun paramsText(): String = paramsEditor.text
