@@ -421,7 +421,10 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
             project,
             "Deleting database…",
             work = { service.deleteDatabase(data.connectionName, data.databaseId) },
-            onSuccess = { parentNode(node)?.let { reload(it) } },
+            onSuccess = {
+                closeTabsForDatabase(data.connectionName, data.databaseId)   // tabs for any of its containers
+                parentNode(node)?.let { reload(it) }
+            },
         )
     }
 
@@ -452,7 +455,10 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
             project,
             "Deleting container…",
             work = { service.deleteContainer(data.connectionName, data.databaseId, data.containerId) },
-            onSuccess = { parentNode(node)?.let { reload(it) } },
+            onSuccess = {
+                closeTabsForContainer(data.connectionName, data.databaseId, data.containerId)
+                parentNode(node)?.let { reload(it) }
+            },
         )
     }
 
@@ -484,15 +490,24 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         updateRightCard()
     }
 
-    /** Closes open query tabs for a connection (on edit/remove) so a later same-named
-     *  connection cannot inherit a stale tab pointing at the old account. */
-    private fun closeTabsForConnection(name: String) {
-        openTabs.filterKeys { it.connection == name }.forEach { (key, panel) ->
+    /** Closes open query tabs matching a predicate, so a later same-named connection / database /
+     *  container cannot inherit a stale tab pointing at the old resource. */
+    private fun closeTabs(matches: (TabKey) -> Boolean) {
+        openTabs.filterKeys(matches).forEach { (key, panel) ->
             tabs.remove(panel)
             openTabs.remove(key)
         }
         updateRightCard()
     }
+
+    private fun closeTabsForConnection(name: String) =
+        closeTabs { it.connection == name }
+
+    private fun closeTabsForDatabase(connection: String, database: String) =
+        closeTabs { it.connection == connection && it.database == database }
+
+    private fun closeTabsForContainer(connection: String, database: String, container: String) =
+        closeTabs { it.connection == connection && it.database == database && it.container == container }
 
     private fun addClosableTab(title: String, component: JComponent, onClose: () -> Unit) {
         tabs.addTab(title, component)
