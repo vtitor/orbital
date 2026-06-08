@@ -62,4 +62,15 @@ class ResultTableModelTest {
         assertEquals(1, model.columnCount)
         assertEquals("id", model.getColumnName(0))
     }
+
+    @Test fun scalarAndArrayResultsUseSingleValueColumn() {
+        val model = ResultTableModel()
+        // e.g. results of `SELECT VALUE c.id` (scalars) or a projected array
+        model.setRows(listOf(mapper.readTree("\"abc\""), mapper.readTree("42"), mapper.readTree("[1,2,3]")))
+        assertEquals(1, model.columnCount)
+        assertEquals("value", model.getColumnName(0))
+        assertEquals("abc", model.getValueAt(0, 0))
+        assertEquals("42", model.getValueAt(1, 0))
+        assertEquals("[ 3 ]", model.getValueAt(2, 0))
+    }
 }

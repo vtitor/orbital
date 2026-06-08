@@ -1,25 +1,27 @@
 package com.github.cosmosdbclient.ui
 
-import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.databind.JsonNode
 import javax.swing.table.AbstractTableModel
 
 /**
- * Table model over a page of query results. Columns are the union of top-level field names
- * across the rows (id first), so heterogeneous, schemaless documents still render sensibly.
+ * Table model over a page of query results. When every row is a JSON object, columns are the
+ * union of top-level field names (id first). If any row is a scalar or array (e.g. from
+ * `SELECT VALUE ...`), the whole result set is shown in a single "value" column.
  */
 class ResultTableModel : AbstractTableModel() {
 
-    private val rows = mutableListOf<ObjectNode>()
+    private val rows = mutableListOf<JsonNode>()
     private var columns = listOf("id")
+    private var valueMode = false
 
-    fun setRows(items: List<ObjectNode>) {
+    fun setRows(items: List<JsonNode>) {
         rows.clear()
         rows.addAll(items)
         recomputeColumns()
         fireTableStructureChanged()
     }
 
-    fun addRows(items: List<ObjectNode>) {
+    fun addRows(items: List<JsonNode>) {
         rows.addAll(items)
         recomputeColumns()
         fireTableStructureChanged()
@@ -28,10 +30,11 @@ class ResultTableModel : AbstractTableModel() {
     fun clear() {
         rows.clear()
         columns = listOf("id")
+        valueMode = false
         fireTableStructureChanged()
     }
 
-    fun rowItem(index: Int): ObjectNode? = rows.getOrNull(index)
+    fun rowItem(index: Int): JsonNode? = rows.getOrNull(index)
 
     val size: Int get() = rows.size
 
@@ -44,17 +47,26 @@ class ResultTableModel : AbstractTableModel() {
     override fun isCellEditable(rowIndex: Int, columnIndex: Int): Boolean = false
 
     override fun getValueAt(rowIndex: Int, columnIndex: Int): Any {
-        val node = rows[rowIndex].get(columns[columnIndex]) ?: return ""
-        return when {
-            node.isNull -> "null"
-            node.isValueNode -> node.asText()
-            node.isArray -> "[ ${node.size()} ]"
-            node.isObject -> compact(node.toString())
-            else -> compact(node.toString())
-        }
+        val row = rows[rowIndex]
+        if (valueMode) return render(row)
+        val node = row.get(columns[columnIndex]) ?: return ""
+        return render(node)
+    }
+
+    private fun render(node: JsonNode?): String = when {
+        node == null -> ""
+        node.isNull -> "null"
+        node.isValueNode -> node.asText()
+        node.isArray -> "[ ${node.size()} ]"
+        else -> compact(node.toString())
     }
 
     private fun recomputeColumns() {
+        valueMode = rows.any { !it.isObject }
+        if (valueMode) {
+            columns = listOf("value")
+            return
+        }
         val names = LinkedHashSet<String>()
         if (rows.any { it.has("id") }) names.add("id")
         for (row in rows) {

@@ -143,7 +143,7 @@ class CosmosService : Disposable {
         continuationToken: String?,
     ): QueryResult = withClient(connectionName) { client ->
         val container = client.getDatabase(databaseId).getContainer(containerId)
-        val pagedItems = container.queryItems(sql, CosmosQueryRequestOptions(), ObjectNode::class.java)
+        val pagedItems = container.queryItems(sql, CosmosQueryRequestOptions(), JsonNode::class.java)
         val start = System.nanoTime()
         val pages = if (continuationToken.isNullOrBlank()) {
             pagedItems.iterableByPage(pageSize)

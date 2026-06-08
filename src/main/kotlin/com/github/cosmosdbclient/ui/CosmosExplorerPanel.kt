@@ -379,6 +379,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         if (!dialog.showAndGet()) return
         val input = dialog.result()
         service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key)
+        closeTabsForConnection(data.connectionName)   // endpoint/key may have changed
         reloadConnections()
     }
 
@@ -391,6 +392,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         )
         if (confirm != Messages.YES) return
         service.removeConnection(data.connectionName)
+        closeTabsForConnection(data.connectionName)
         reloadConnections()
     }
 
@@ -479,6 +481,16 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
             updateRightCard()
         }
         tabs.selectedComponent = panel
+        updateRightCard()
+    }
+
+    /** Closes open query tabs for a connection (on edit/remove) so a later same-named
+     *  connection cannot inherit a stale tab pointing at the old account. */
+    private fun closeTabsForConnection(name: String) {
+        openTabs.filterKeys { it.connection == name }.forEach { (key, panel) ->
+            tabs.remove(panel)
+            openTabs.remove(key)
+        }
         updateRightCard()
     }
 

@@ -1,6 +1,9 @@
 package com.github.cosmosdbclient.ui
 
+import com.azure.cosmos.models.PartitionKey
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.github.cosmosdbclient.service.CosmosErrors
 import com.github.cosmosdbclient.service.CosmosService
 import com.github.cosmosdbclient.util.Bg
 import com.intellij.icons.AllIcons
@@ -42,7 +45,12 @@ class QueryPanel(
 
     private val service = CosmosService.getInstance()
     private var continuationToken: String? = null
-    private val loadedItems = mutableListOf<ObjectNode>()
+    private var queryGeneration = 0
+    private val loadedItems = mutableListOf<JsonNode>()
+
+    /** id + partition key of the document currently loaded in the editor (null for a new doc). */
+    private var loadedId: String? = null
+    private var loadedPartitionKey: PartitionKey? = null
 
     private val queryEditor = CosmosEditors.plain(project, "SELECT * FROM c").apply {
         preferredSize = Dimension(100, 92)
@@ -144,10 +152,13 @@ class QueryPanel(
         if (reset) {
             continuationToken = null
             loadedItems.clear()
+            tableModel.clear()                 // don't leave stale rows visible while (re)querying
+            countLabel.text = "Results"
         }
         val sql = queryEditor.text.ifBlank { "SELECT * FROM c" }
         val pageSize = pageSizeSpinner.value as Int
         val token = if (reset) null else continuationToken
+        val generation = ++queryGeneration     // tag this request; ignore callbacks from older ones
 
         executeButton.isEnabled = false
         loadMoreButton.isEnabled = false
@@ -156,19 +167,23 @@ class QueryPanel(
             "Querying $containerId…",
             work = { service.query(connectionName, databaseId, containerId, sql, pageSize, token) },
             onSuccess = { page ->
-                if (reset) tableModel.setRows(page.items) else tableModel.addRows(page.items)
-                loadedItems.addAll(page.items)
-                continuationToken = page.continuationToken
-                executeButton.isEnabled = true
-                loadMoreButton.isEnabled = continuationToken != null
-                exportButton.isEnabled = loadedItems.isNotEmpty()
-                countLabel.text = "Results — ${tableModel.size} document(s)"
-                statusLabel.text = "RU (page): ${"%.2f".format(page.requestCharge)}   •   ${page.elapsedMillis} ms" +
-                    (if (continuationToken != null) "   •   more available" else "")
+                if (generation == queryGeneration) {
+                    if (reset) tableModel.setRows(page.items) else tableModel.addRows(page.items)
+                    loadedItems.addAll(page.items)
+                    continuationToken = page.continuationToken
+                    executeButton.isEnabled = true
+                    loadMoreButton.isEnabled = continuationToken != null
+                    exportButton.isEnabled = loadedItems.isNotEmpty()
+                    countLabel.text = "Results — ${tableModel.size} document(s)"
+                    statusLabel.text = "RU (page): ${"%.2f".format(page.requestCharge)}   •   ${page.elapsedMillis} ms" +
+                        (if (continuationToken != null) "   •   more available" else "")
+                }
             },
             onError = { error ->
-                executeButton.isEnabled = true
-                com.github.cosmosdbclient.service.CosmosErrors.notifyError(project, "Query", error)
+                if (generation == queryGeneration) {
+                    executeButton.isEnabled = true
+                    CosmosErrors.notifyError(project, "Query", error)
+                }
             },
         )
     }
@@ -185,14 +200,25 @@ class QueryPanel(
 
     private fun showSelectedRow() {
         val viewRow = table.selectedRow
-        if (viewRow < 0) {
+        val item = if (viewRow < 0) null else tableModel.rowItem(table.convertRowIndexToModel(viewRow))
+        if (item == null) {
             deleteButton.isEnabled = false
+            loadedId = null
+            loadedPartitionKey = null
             return
         }
-        val item = tableModel.rowItem(table.convertRowIndexToModel(viewRow))
-        if (item != null) {
-            docEditor.text = service.prettyPrint(item)
+        docEditor.text = service.prettyPrint(item)
+        // Only a full document object with an id can be replaced/deleted in place; remember its
+        // original id + partition key so save can detect a partition-changing edit.
+        val id = (item as? ObjectNode)?.get("id")?.asText()
+        if (!id.isNullOrBlank()) {
+            loadedId = id
+            loadedPartitionKey = service.partitionKeyOf(item, partitionKeyPaths)
             deleteButton.isEnabled = true
+        } else {
+            loadedId = null
+            loadedPartitionKey = null
+            deleteButton.isEnabled = false
         }
     }
 
@@ -200,6 +226,8 @@ class QueryPanel(
         table.clearSelection()
         docEditor.text = "{\n  \"id\": \"\"\n}\n"
         deleteButton.isEnabled = false
+        loadedId = null
+        loadedPartitionKey = null
         docEditor.requestFocusInWindow()
     }
 
@@ -215,6 +243,19 @@ class QueryPanel(
             Messages.showErrorDialog(project, "The document must contain a non-empty \"id\" field.", "Invalid Document")
             return
         }
+        // id is unique only within a partition: changing the id or partition key would create a
+        // NEW document and leave the original behind. Make that explicit when editing a loaded doc.
+        val newPartitionKey = service.partitionKeyOf(document, partitionKeyPaths)
+        if (loadedId != null && (id != loadedId || newPartitionKey != loadedPartitionKey)) {
+            val proceed = Messages.showYesNoDialog(
+                project,
+                "The id or partition key differs from the loaded document. Saving will create a NEW " +
+                    "document in a different partition and leave the original unchanged. Continue?",
+                "Id / Partition Key Changed",
+                Messages.getWarningIcon(),
+            )
+            if (proceed != Messages.YES) return
+        }
         saveButton.isEnabled = false
         Bg.run(
             project,
@@ -227,7 +268,7 @@ class QueryPanel(
             },
             onError = { error ->
                 saveButton.isEnabled = true
-                com.github.cosmosdbclient.service.CosmosErrors.notifyError(project, "Save document", error)
+                CosmosErrors.notifyError(project, "Save document", error)
             },
         )
     }
@@ -236,7 +277,8 @@ class QueryPanel(
         val viewRow = table.selectedRow
         if (viewRow < 0) return
         val item = tableModel.rowItem(table.convertRowIndexToModel(viewRow)) ?: return
-        val id = item.get("id")?.asText() ?: return
+        val id = (item as? ObjectNode)?.get("id")?.asText()
+        if (id.isNullOrBlank()) return
 
         val confirm = Messages.showYesNoDialog(
             project,
@@ -247,6 +289,7 @@ class QueryPanel(
         if (confirm != Messages.YES) return
 
         val partitionKey = service.partitionKeyOf(item, partitionKeyPaths)
+        deleteButton.isEnabled = false
         Bg.run(
             project,
             "Deleting document…",
@@ -254,6 +297,10 @@ class QueryPanel(
             onSuccess = { ru ->
                 statusLabel.text = "Deleted \"$id\"   •   RU: ${"%.2f".format(ru)}"
                 execute(reset = true)
+            },
+            onError = { error ->
+                deleteButton.isEnabled = true
+                CosmosErrors.notifyError(project, "Delete document", error)
             },
         )
     }
@@ -267,12 +314,24 @@ class QueryPanel(
             .createSaveFileDialog(descriptor, project)
             .save(null as VirtualFile?, "$containerId.json")
             ?: return
-        try {
-            val json = loadedItems.joinToString(",\n", prefix = "[\n", postfix = "\n]") { service.prettyPrint(it) }
-            wrapper.file.writeText(json)
-            statusLabel.text = "Exported ${loadedItems.size} document(s) to ${wrapper.file.name}"
-        } catch (e: Exception) {
-            Messages.showErrorDialog(project, e.message ?: "Could not write file.", "Export Failed")
-        }
+        val file = wrapper.file
+        val items = loadedItems.toList()   // snapshot; serialize + write off the EDT
+        exportButton.isEnabled = false
+        Bg.run(
+            project,
+            "Exporting ${items.size} document(s)…",
+            work = {
+                file.writeText(items.joinToString(",\n", prefix = "[\n", postfix = "\n]") { service.prettyPrint(it) })
+                items.size
+            },
+            onSuccess = { count ->
+                exportButton.isEnabled = true
+                statusLabel.text = "Exported $count document(s) to ${file.name}"
+            },
+            onError = { error ->
+                exportButton.isEnabled = true
+                CosmosErrors.notifyError(project, "Export", error)
+            },
+        )
     }
 }

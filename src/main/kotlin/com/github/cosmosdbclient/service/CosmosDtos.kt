@@ -1,6 +1,6 @@
 package com.github.cosmosdbclient.service
 
-import com.fasterxml.jackson.databind.node.ObjectNode
+import com.fasterxml.jackson.databind.JsonNode
 
 /** How throughput is provisioned when creating a database/container. */
 enum class ThroughputMode { MANUAL, AUTOSCALE, NONE }
@@ -26,9 +26,10 @@ data class ContainerDetails(
     val throughput: ThroughputInfo?,
 )
 
-/** One page of query results plus timing/metrics. */
+/** One page of query results plus timing/metrics. Items may be objects, scalars or arrays
+ *  (e.g. from `SELECT VALUE ...`), so they are modelled as generic [JsonNode]s. */
 data class QueryResult(
-    val items: List<ObjectNode>,
+    val items: List<JsonNode>,
     val requestCharge: Double,
     val continuationToken: String?,
     val elapsedMillis: Long,

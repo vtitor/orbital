@@ -94,6 +94,11 @@ class CosmosEmulatorIntegrationTest {
 
         assertEquals(42, service.readItem(connection, databaseId, containerId, "1", PartitionKey("p")).get("v").asInt())
 
+        // SELECT VALUE returns a scalar (not an object) — guards the JsonNode result handling
+        val scalars = service.query(connection, databaseId, containerId, "SELECT VALUE c.id FROM c", 10, null)
+        assertEquals(1, scalars.items.size)
+        assertEquals("1", scalars.items[0].asText())
+
         // update via upsert
         service.upsert(connection, databaseId, containerId, doc("""{"id":"1","pk":"p","v":99}"""))
         assertEquals(99, service.readItem(connection, databaseId, containerId, "1", PartitionKey("p")).get("v").asInt())
