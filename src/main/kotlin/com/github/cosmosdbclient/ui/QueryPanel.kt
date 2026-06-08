@@ -98,7 +98,7 @@ class QueryPanel(
     }
 
     private fun buildHeader(): JComponent {
-        val title = JBLabel("$databaseId  ▸  $containerId").apply {
+        val title = JBLabel("$connectionName  ▸  $databaseId  ▸  $containerId").apply {
             font = JBFont.label().asBold()
             if (partitionKeyPaths.isNotEmpty()) {
                 toolTipText = "Partition key: ${partitionKeyPaths.joinToString()}"

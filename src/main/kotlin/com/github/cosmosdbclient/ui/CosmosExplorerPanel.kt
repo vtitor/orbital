@@ -20,13 +20,14 @@ import com.intellij.ui.OnePixelSplitter
 import com.intellij.ui.PopupHandler
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTabbedPane
+import com.intellij.ui.tabs.JBTabs
+import com.intellij.ui.tabs.JBTabsFactory
+import com.intellij.ui.tabs.TabInfo
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.CardLayout
 import java.awt.Component
-import java.awt.FlowLayout
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
 import javax.swing.JComponent
@@ -52,8 +53,8 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
     private val treeModel = DefaultTreeModel(rootNode)
     private val tree = Tree(treeModel)
 
-    private val tabs = JBTabbedPane()
-    private val openTabs = mutableMapOf<TabKey, QueryPanel>()
+    private val tabs: JBTabs = JBTabsFactory.createTabs(project)
+    private val openTabs = mutableMapOf<TabKey, TabInfo>()
     private val rightCards = JPanel(CardLayout())
 
     init {
@@ -61,7 +62,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         toolbar = createToolbar()
 
         rightCards.add(welcomePanel(), CARD_EMPTY)
-        rightCards.add(tabs, CARD_TABS)
+        rightCards.add(tabs.component, CARD_TABS)
 
         val splitter = OnePixelSplitter(false, 0.32f).apply {
             firstComponent = JBScrollPane(tree)
@@ -497,27 +498,34 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun openQueryTab(data: ContainerNode) {
         val key = TabKey(data.connectionName, data.databaseId, data.containerId)
-        openTabs[key]?.let { existing ->
-            tabs.selectedComponent = existing
-            return
-        }
+        openTabs[key]?.let { tabs.select(it, true); return }
+
         val panel = QueryPanel(project, data.connectionName, data.databaseId, data.containerId, data.partitionKeyPaths)
-        openTabs[key] = panel
-        addClosableTab("${data.databaseId}/${data.containerId}", panel) {
-            tabs.remove(panel)
-            openTabs.remove(key)
-            updateRightCard()
+        val info = TabInfo(panel)
+            .setText("${data.connectionName}  ▸  ${data.databaseId} / ${data.containerId}")
+            .setIcon(AllIcons.Nodes.DataColumn)
+        val close = object : AnAction("Close Tab", "Close this query tab", AllIcons.Actions.Close) {
+            override fun getActionUpdateThread() = ActionUpdateThread.EDT
+            override fun actionPerformed(e: AnActionEvent) = closeQueryTab(key)
         }
-        tabs.selectedComponent = panel
+        info.setTabLabelActions(DefaultActionGroup(close), "OrbitalQueryTabs")
+        openTabs[key] = info
+        tabs.addTab(info)
+        tabs.select(info, true)
+        updateRightCard()
+    }
+
+    private fun closeQueryTab(key: TabKey) {
+        openTabs.remove(key)?.let { tabs.removeTab(it) }
         updateRightCard()
     }
 
     /** Closes open query tabs matching a predicate, so a later same-named connection / database /
      *  container cannot inherit a stale tab pointing at the old resource. */
     private fun closeTabs(matches: (TabKey) -> Boolean) {
-        openTabs.filterKeys(matches).forEach { (key, panel) ->
-            tabs.remove(panel)
+        openTabs.filterKeys(matches).forEach { (key, info) ->
             openTabs.remove(key)
+            tabs.removeTab(info)
         }
         updateRightCard()
     }
@@ -530,21 +538,6 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
 
     private fun closeTabsForContainer(connection: String, database: String, container: String) =
         closeTabs { it.connection == connection && it.database == database && it.container == container }
-
-    private fun addClosableTab(title: String, component: JComponent, onClose: () -> Unit) {
-        tabs.addTab(title, component)
-        val index = tabs.indexOfComponent(component)
-        val header = JPanel(FlowLayout(FlowLayout.LEFT, 4, 0)).apply { isOpaque = false }
-        header.add(JBLabel(title))
-        val close = JBLabel(AllIcons.Actions.Close).apply {
-            toolTipText = "Close"
-            addMouseListener(object : MouseAdapter() {
-                override fun mouseClicked(e: MouseEvent) = onClose()
-            })
-        }
-        header.add(close)
-        tabs.setTabComponentAt(index, header)
-    }
 
     private fun updateRightCard() {
         (rightCards.layout as CardLayout).show(rightCards, if (tabs.tabCount == 0) CARD_EMPTY else CARD_TABS)

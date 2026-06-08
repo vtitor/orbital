@@ -42,9 +42,9 @@ class AddConnectionDialog(
     private val existingNames: Set<String> = emptySet(),
 ) : DialogWrapper(project) {
 
-    private val nameField = JBTextField(existing?.name.orEmpty(), 32)
-    private val endpointField = JBTextField(existing?.endpoint.orEmpty(), 32)
-    private val keyField = JBPasswordField()
+    private val nameField = JBTextField(existing?.name.orEmpty(), 40)
+    private val endpointField = JBTextField(existing?.endpoint.orEmpty(), 48)
+    private val keyField = JBPasswordField().apply { columns = 48 }
     private val gatewayCheck = JBCheckBox(
         "Use Gateway connection mode (recommended; works behind most firewalls)",
         existing?.preferGateway ?: true,
@@ -83,7 +83,7 @@ class AddConnectionDialog(
             .addComponentFillVertically(JPanel(), 8)
             .addComponent(hint)
             .panel
-            .apply { preferredSize = Dimension(560, 220) }
+            .apply { preferredSize = Dimension(680, 240) }
     }
 
     override fun getPreferredFocusedComponent(): JComponent = if (existing == null) nameField else keyField
