@@ -171,8 +171,6 @@ class QueryPanel(
                     if (reset) tableModel.setRows(page.items) else tableModel.addRows(page.items)
                     loadedItems.addAll(page.items)
                     continuationToken = page.continuationToken
-                    executeButton.isEnabled = true
-                    loadMoreButton.isEnabled = continuationToken != null
                     exportButton.isEnabled = loadedItems.isNotEmpty()
                     countLabel.text = "Results — ${tableModel.size} document(s)"
                     statusLabel.text = "RU (page): ${"%.2f".format(page.requestCharge)}   •   ${page.elapsedMillis} ms" +
@@ -181,8 +179,14 @@ class QueryPanel(
             },
             onError = { error ->
                 if (generation == queryGeneration) {
-                    executeButton.isEnabled = true
                     CosmosErrors.notifyError(project, "Query", error)
+                }
+            },
+            // Runs even if the query is cancelled (onSuccess won't): always re-enable controls.
+            onComplete = {
+                if (generation == queryGeneration) {
+                    executeButton.isEnabled = true
+                    loadMoreButton.isEnabled = continuationToken != null
                 }
             },
         )
@@ -191,8 +195,9 @@ class QueryPanel(
     private fun findById() {
         val id = idField.text.trim()
         if (id.isEmpty()) return
-        val escaped = id.replace("\\", "\\\\").replace("\"", "\\\"")
-        queryEditor.text = "SELECT * FROM c WHERE c.id = \"$escaped\""
+        // jsonLiteral fully escapes the id (Cosmos SQL string literals use JSON syntax), so an
+        // arbitrary id can't break out of the string literal.
+        queryEditor.text = "SELECT * FROM c WHERE c.id = ${service.jsonLiteral(id)}"
         execute(reset = true)
     }
 
@@ -260,6 +265,7 @@ class QueryPanel(
         Bg.run(
             project,
             "Saving document…",
+            cancellable = false,
             work = { service.upsert(connectionName, databaseId, containerId, document) },
             onSuccess = { ru ->
                 saveButton.isEnabled = true
@@ -293,6 +299,7 @@ class QueryPanel(
         Bg.run(
             project,
             "Deleting document…",
+            cancellable = false,
             work = { service.delete(connectionName, databaseId, containerId, id, partitionKey) },
             onSuccess = { ru ->
                 statusLabel.text = "Deleted \"$id\"   •   RU: ${"%.2f".format(ru)}"
@@ -320,6 +327,7 @@ class QueryPanel(
         Bg.run(
             project,
             "Exporting ${items.size} document(s)…",
+            cancellable = false,
             work = {
                 file.writeText(items.joinToString(",\n", prefix = "[\n", postfix = "\n]") { service.prettyPrint(it) })
                 items.size

@@ -11,7 +11,8 @@ import com.github.cosmosdbclient.service.CosmosService
 import com.github.cosmosdbclient.service.ScriptKind
 import com.github.cosmosdbclient.service.ThroughputMode
 import com.github.cosmosdbclient.service.ThroughputSpec
-import com.github.cosmosdbclient.util.Bg
+import com.intellij.openapi.application.ApplicationManager
+import com.intellij.openapi.application.ModalityState
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
 import com.intellij.openapi.ui.DialogWrapper
@@ -111,21 +112,28 @@ class AddConnectionDialog(
         testLabel.text = "Testing…"
         testLabel.foreground = JBColor.GRAY
         testButton.isEnabled = false
-        Bg.run(
-            project,
-            "Testing connection…",
-            work = { CosmosService.getInstance().testConnection(input.endpoint, input.key, input.preferGateway) },
-            onSuccess = { count ->
+        // Run off the EDT and post the result back in this modal dialog's modality state, so the
+        // label updates while the dialog is still open.
+        val modality = ModalityState.stateForComponent(testButton)
+        val app = ApplicationManager.getApplication()
+        app.executeOnPooledThread {
+            val outcome = runCatching {
+                CosmosService.getInstance().testConnection(input.endpoint, input.key, input.preferGateway)
+            }
+            app.invokeLater({
                 testButton.isEnabled = true
-                testLabel.text = "✓ Connected — $count database(s)"
-                testLabel.foreground = JBColor(0x3C8033, 0x5FAD51)
-            },
-            onError = { error ->
-                testButton.isEnabled = true
-                testLabel.text = "✗ " + CosmosErrors.shortMessage(error)
-                testLabel.foreground = JBColor.RED
-            },
-        )
+                outcome.fold(
+                    { count ->
+                        testLabel.text = "✓ Connected — $count database(s)"
+                        testLabel.foreground = JBColor(0x3C8033, 0x5FAD51)
+                    },
+                    { error ->
+                        testLabel.text = "✗ " + CosmosErrors.shortMessage(error)
+                        testLabel.foreground = JBColor.RED
+                    },
+                )
+            }, modality)
+        }
     }
 
     fun result(): ConnInput {

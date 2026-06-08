@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.github.cosmosdbclient.model.CosmosConnection
 import com.intellij.openapi.Disposable
+import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import org.jetbrains.annotations.TestOnly
@@ -52,7 +53,13 @@ class CosmosService : Disposable {
     }
 
     fun invalidate(name: String) {
-        clients.remove(name)?.let { runCatching { it.close() } }
+        // Closing the SDK client shuts down reactor-netty and can block for a while; never do
+        // it on the calling thread (often the EDT) — hand it off to a pooled thread.
+        clients.remove(name)?.let { client ->
+            ApplicationManager.getApplication().executeOnPooledThread {
+                withPluginClassLoader { runCatching { client.close() } }
+            }
+        }
     }
 
     /**
@@ -267,6 +274,13 @@ class CosmosService : Disposable {
     // ---- JSON / partition-key helpers -----------------------------------------
 
     fun prettyPrint(node: JsonNode): String = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(node)
+
+    /**
+     * Produces a fully-escaped JSON string literal (quotes included) for [value]. Cosmos SQL
+     * string literals follow JSON string syntax, so this is safe to embed in a query without
+     * hand-rolled escaping.
+     */
+    fun jsonLiteral(value: String): String = mapper.writeValueAsString(value)
 
     fun parseObject(text: String): ObjectNode {
         val node = mapper.readTree(text)

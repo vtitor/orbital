@@ -93,6 +93,13 @@ class CosmosServiceLogicTest {
         assertNotEquals(nul, empty)
     }
 
+    @Test fun jsonLiteralFullyEscapesForSafeEmbedding() {
+        assertEquals("\"abc\"", service.jsonLiteral("abc"))
+        // a quote / backslash in the id must be escaped so it cannot break out of the literal
+        assertEquals("\"a\\\"b\"", service.jsonLiteral("a\"b"))
+        assertEquals("\"a\\\\b\"", service.jsonLiteral("a\\b"))
+    }
+
     @Test fun normalizePathEnsuresLeadingSlash() {
         assertEquals("/pk", service.normalizePath("pk"))
         assertEquals("/pk", service.normalizePath("/pk"))

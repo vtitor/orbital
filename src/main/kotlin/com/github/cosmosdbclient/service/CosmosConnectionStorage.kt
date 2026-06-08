@@ -40,14 +40,21 @@ class CosmosConnectionStorage : PersistentStateComponent<CosmosConnectionStorage
         state = newState
     }
 
+    // list/find/save/remove are @Synchronized: the connection list is read from background
+    // threads (buildClient) while the EDT mutates it (save/remove), which would otherwise risk
+    // a ConcurrentModificationException on the backing ArrayList.
+
+    @Synchronized
     fun list(): List<CosmosConnection> =
         state.connections.map { CosmosConnection(it.name, it.endpoint, it.preferGateway) }
 
+    @Synchronized
     fun find(name: String): CosmosConnection? =
         state.connections.firstOrNull { it.name == name }
             ?.let { CosmosConnection(it.name, it.endpoint, it.preferGateway) }
 
     /** Inserts or updates a connection (matched by [CosmosConnection.name]). A non-null [key] updates the stored key. */
+    @Synchronized
     fun save(connection: CosmosConnection, key: String?) {
         val record = state.connections.firstOrNull { it.name == connection.name }
             ?: StoredConnection().also { state.connections.add(it) }
@@ -57,6 +64,7 @@ class CosmosConnectionStorage : PersistentStateComponent<CosmosConnectionStorage
         if (key != null) setKey(connection.name, key)
     }
 
+    @Synchronized
     fun remove(name: String) {
         state.connections.removeIf { it.name == name }
         setKey(name, null)

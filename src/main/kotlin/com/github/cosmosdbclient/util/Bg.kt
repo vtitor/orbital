@@ -19,8 +19,10 @@ object Bg {
         work: () -> T,
         onSuccess: (T) -> Unit = {},
         onError: (Throwable) -> Unit = { CosmosErrors.notifyError(project, title.trimEnd('…', '.'), it) },
+        cancellable: Boolean = true,
+        onComplete: () -> Unit = {},
     ) {
-        ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, true) {
+        ProgressManager.getInstance().run(object : Task.Backgroundable(project, title, cancellable) {
             private var outcome: Result<T>? = null
 
             override fun run(indicator: ProgressIndicator) {
@@ -29,6 +31,12 @@ object Bg {
 
             override fun onSuccess() {
                 outcome?.fold(onSuccess, onError)
+            }
+
+            // Always runs on the EDT — including when the task is cancelled (when onSuccess is
+            // NOT called), so callers can reliably reset UI state (buttons, loading flags).
+            override fun onFinished() {
+                onComplete()
             }
         })
     }

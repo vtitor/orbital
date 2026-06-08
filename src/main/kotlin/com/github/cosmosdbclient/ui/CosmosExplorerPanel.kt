@@ -212,6 +212,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         Bg.run(
             project,
             "Loading databases…",
+            cancellable = false,
             work = { service.listDatabases(data.connectionName) },
             onSuccess = { databases ->
                 node.removeAllChildren()
@@ -238,6 +239,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         Bg.run(
             project,
             "Loading containers…",
+            cancellable = false,
             work = { service.listContainers(data.connectionName, data.databaseId) },
             onSuccess = { containers ->
                 node.removeAllChildren()
@@ -282,6 +284,7 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         Bg.run(
             project,
             "Loading ${data.kind.title}…",
+            cancellable = false,
             work = {
                 when (data.kind) {
                     ScriptKind.STORED_PROCEDURE -> service.listStoredProcedures(data.connectionName, data.databaseId, data.containerId)
@@ -369,8 +372,13 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         val dialog = AddConnectionDialog(project, null, service.connections().map { it.name }.toSet())
         if (!dialog.showAndGet()) return
         val input = dialog.result()
-        service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key)
-        reloadConnections()
+        Bg.run(
+            project,
+            "Saving connection…",
+            cancellable = false,
+            work = { service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key) },
+            onSuccess = { reloadConnections() },
+        )
     }
 
     private fun editConnection(data: ConnectionNode) {
@@ -378,9 +386,16 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
         val dialog = AddConnectionDialog(project, connection)
         if (!dialog.showAndGet()) return
         val input = dialog.result()
-        service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key)
-        closeTabsForConnection(data.connectionName)   // endpoint/key may have changed
-        reloadConnections()
+        Bg.run(
+            project,
+            "Saving connection…",
+            cancellable = false,
+            work = { service.saveConnection(CosmosConnection(input.name, input.endpoint, input.preferGateway), input.key) },
+            onSuccess = {
+                closeTabsForConnection(data.connectionName)   // endpoint/key may have changed
+                reloadConnections()
+            },
+        )
     }
 
     private fun removeConnection(data: ConnectionNode) {
@@ -391,9 +406,16 @@ class CosmosExplorerPanel(private val project: Project) : SimpleToolWindowPanel(
             Messages.getQuestionIcon(),
         )
         if (confirm != Messages.YES) return
-        service.removeConnection(data.connectionName)
-        closeTabsForConnection(data.connectionName)
-        reloadConnections()
+        Bg.run(
+            project,
+            "Removing connection…",
+            cancellable = false,
+            work = { service.removeConnection(data.connectionName) },
+            onSuccess = {
+                closeTabsForConnection(data.connectionName)
+                reloadConnections()
+            },
+        )
     }
 
     // ---- database / container actions ------------------------------------------
